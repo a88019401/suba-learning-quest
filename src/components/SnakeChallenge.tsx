@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Word } from "../types";
 import { Card, SectionTitle } from "./ui";
-
+import { supabase } from "../supabaseClient";
 /**
  * 第 2 關：貪吃蛇（Vocabulary Multiple-Choice 版）
  * - 固定 10 題（可調），每題同時出現 3 個選項（紅點），吃到其中一個即作答，立即換下一題
@@ -14,14 +14,14 @@ import { Card, SectionTitle } from "./ui";
 
 export type SnakeChallengeProps = {
   title?: string;
-  totalTime?: number;        // 總限時（秒），預設 120
+  totalTime?: number; // 總限時（秒），預設 120
   speedMs?: number; // 蛇移動間隔（毫秒）
   words?: Word[]; // 題庫（建議傳 unit.words）
   totalQuestions?: number; // 保留相容，已不使用
   /** ✅ 必達門檻（達標立即通關、用於解鎖下一關） */
   targetScore: number;
   /** 顯示/回報用門檻；未提供時等同 targetScore */
-  passScore?: number;// 保留相容，已不使用
+  passScore?: number; // 保留相容，已不使用
   questionMode?: "defToTerm" | "termToDef"; // 題幹呈現方式（預設 defToTerm：看中吃英）
   growOnCorrect?: boolean; // 答對是否加長蛇身（預設 true）
   onFinish: (score: number, timeUsed: number) => void;
@@ -123,7 +123,9 @@ export default function SnakeChallenge({
   onReport,
 }: SnakeChallengeProps) {
   //const threshold = passScore ?? targetScore; // 顯示/回報一律用 threshold
-void totalQuestions; void targetScore; void passScore;
+  void totalQuestions;
+  void targetScore;
+  void passScore;
   // 基本狀態
   const [started, setStarted] = useState(false);
   //const [left, setLeft] = useState(totalTime);
@@ -228,7 +230,7 @@ void totalQuestions; void targetScore; void passScore;
       setPrompt(p);
       roundStartRef.current = performance.now();
     },
-    [ pool, questionMode]
+    [pool, questionMode]
   );
 
   // 主迴圈
@@ -434,7 +436,7 @@ void totalQuestions; void targetScore; void passScore;
 
   // 結束與回報（防重複）
   const endGame = useCallback(
-    (finalScore?: number) => {
+    async (finalScore?: number) => {
       if (finishedRef.current) return;
       finishedRef.current = true;
 
@@ -448,7 +450,43 @@ void totalQuestions; void targetScore; void passScore;
       setGameOver(true);
 
       onFinish(correct, usedTime);
+      // ✅ --- 新增上傳排行榜的邏輯 ---
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (user) {
+          // 從 profiles 表取得使用者姓名
+          const { data: profile, error: profileError } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", user.id)
+            .single();
+          if (profileError) throw profileError;
 
+          // upsert 會自動判斷是新增還是更新
+          const { error: upsertError } = await supabase
+            .from("leaderboard")
+            .upsert(
+              {
+                user_id: user.id,
+                full_name: profile.full_name,
+                game: "snake",
+                score: correct,
+              },
+              {
+                onConflict: "user_id,game", // 告訴 Supabase 檢查 user_id 和 game 的組合
+                ignoreDuplicates: false,
+              }
+            );
+
+          if (upsertError) throw upsertError;
+          console.log("Successfully upserted leaderboard for snake!");
+        }
+      } catch (error) {
+        console.error("Error updating leaderboard:", error);
+      }
+      // ✅ --- 結束 ---
       const wrongByTerm: Record<string, number> = {};
       logs.forEach((l) => {
         if (!l.isCorrect)

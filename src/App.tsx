@@ -13,7 +13,6 @@ import ReorderSentenceGame from "./components/ReorderSentenceGame";
 import StoryViewer from "./components/StoryViewer";
 import ArrangeSentencesGame from "./components/ArrangeSentencesGame";
 import BadgesView from "./components/BadgesView";
-
 // 挑戰
 import ChallengeRun from "./components/ChallengeRun";
 import type { RunReport } from "./components/ChallengeRun";
@@ -37,11 +36,12 @@ import level5 from "./data/challenges/unit-1/level-5.json";*/
 import { AuthProvider, useAuth } from "./state/AuthContext"; // <-- 匯入 useAuth
 import { supabase } from "./supabaseClient"; // <-- 匯入 supabase client
 import ProfileSetup from "./components/ProfileSetup";
-
+import Leaderboard from "./components/Leaderboard";
+import type { AuthSession } from "@supabase/supabase-js";
 /* -----------------------------
    類型（僅供本檔使用）
 ------------------------------ */
-type Tab = "learn" | "challenge" | "badges";
+type Tab = "learn" | "challenge" | "badges" | "leaderboard";
 type LearnSubTab = "vocab" | "grammar" | "text";
 type VocabView = "set" | "quiz" | "snake";
 type GrammarView = "explain" | "reorder";
@@ -359,7 +359,7 @@ export default function App() {
   }
   // 如果已登入，就顯示原本的 LearningQuestApp
   // 為了方便，我把您原本的 App 內容包成一個新元件
-  return <LearningQuestApp  />;
+  return <LearningQuestApp />;
 }
 function LearningQuestApp() {
   // 頁籤 / 視圖狀態
@@ -545,7 +545,9 @@ function LearningQuestApp() {
       {/* Header */}
       <header className="max-w-5xl mx-auto px-4 py-5 flex items-center justify-between">
         <div>
-          <div className="text-2xl font-bold tracking-tight">LearningQuest</div>
+          <div className="text-2xl font-bold tracking-tight">
+            英文遊戲學習平台
+          </div>
           <div className="text-sm text-neutral-500">
             可模組化英語學習 ·{UNITS.length} 單元 · 遊戲化
           </div>
@@ -566,6 +568,13 @@ function LearningQuestApp() {
           </TabButton>
           <TabButton active={tab === "badges"} onClick={() => setTab("badges")}>
             獎章區
+          </TabButton>
+          {/* 3. ✅ 新增排行榜按鈕 */}
+          <TabButton
+            active={tab === "leaderboard"}
+            onClick={() => setTab("leaderboard")}
+          >
+            排行榜
           </TabButton>
         </div>
       </header>
@@ -905,6 +914,8 @@ function LearningQuestApp() {
             ))}
           {/* 獎章區 */}
           {tab === "badges" && <BadgesView progress={progress} />}
+          {/* 4. ✅ 新增顯示排行榜的邏輯 */}
+          {tab === "leaderboard" && <Leaderboard />}
         </div>
       </main>
 
