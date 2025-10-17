@@ -1,0 +1,85 @@
+{
+  "meta": { "time": 60, "title": "Unit 1 • Level 1" },
+  "questions": [
+    {
+      "id": "u1-l1-q01",
+      "prompt": "Lynn: Does Brian play dodge ball every Sunday?  Tina: Yes, ____.",
+      "choices": ["he is", "he isn’t", "he does", "he doesn’t"],
+      "correctIndex": 2,
+      "explain": "肯定簡答要用助動詞：Yes, he does.",
+      "tag": "grammar"
+    },
+    {
+      "id": "u1-l1-q02",
+      "prompt": "Ann: ____ your mother a housewife?  Sue: Yes, ____.",
+      "choices": ["Are; I am", "Is; she is", "Am; you are", "Is; he is"],
+      "correctIndex": 1,
+      "explain": "問句主詞是 your mother（第三人稱單數），用 Is；答句用 she 代替。",
+      "tag": "grammar"
+    },
+    {
+      "id": "u1-l1-q03",
+      "prompt": "Amy: Are Ben and his brother students?  Bella: Ben is, but his brother ____.",
+      "choices": ["is", "are", "isn’t", "aren’t"],
+      "correctIndex": 2,
+      "explain": "前面肯定 Ben 是；後句是否定『他哥哥不是』→ isn’t。",
+      "tag": "grammar"
+    },
+    {
+      "id": "u1-l1-q04",
+      "prompt": "Peggy: Is Scott’s uncle a police officer?  Neil: ____  He’s an office worker.",
+      "choices": ["No, she isn’t.", "No, he isn’t.", "Yes, she is.", "Yes, he is."],
+      "correctIndex": 1,
+      "explain": "敘述指出他是上班族而不是警察→否定且主詞 he：No, he isn’t.",
+      "tag": "grammar"
+    },
+    {
+      "id": "u1-l1-q05",
+      "prompt": "Nigel has thin lips, but his daughter ____.",
+      "choices": ["do", "don’t", "does", "doesn’t"],
+      "correctIndex": 3,
+      "explain": "主詞 his daughter（第三人稱單數），否定用 doesn’t。",
+      "tag": "grammar"
+    },
+    {
+      "id": "u1-l1-q06",
+      "prompt": "Zac: Hi. I’m Zac. Nice to meet you.  Elsa: Hi. I’m Elsa. ____",
+      "choices": ["I’m fine. Thank you.", "Nice to meet you, too.", "Yeah. She is beautiful.", "It is a new pen."],
+      "correctIndex": 1,
+      "explain": "對應寒暄句型：Nice to meet you, too.",
+      "tag": "dialog"
+    },
+    {
+      "id": "u1-l1-q07",
+      "prompt": "Henry: ____  Alice: I’m 165 centimeters tall.",
+      "choices": ["Are you 165 centimeters tall?", "Are you very tall?", "How tall are you?", "Do you have long legs?"],
+      "correctIndex": 2,
+      "explain": "問『身高多少』要用 How tall...?",
+      "tag": "dialog"
+    },
+    {
+      "id": "u1-l1-q08",
+      "prompt": "Ian is one hundred and eighty centimeters tall. He is good at playing basketball, so he ____.",
+      "choices": ["has small eyes", "is on the school team", "studies English every day", "plays music"],
+      "correctIndex": 1,
+      "explain": "身高高、球打得好 → 合理推論在校隊：is on the school team。",
+      "tag": "dialog"
+    },
+    {
+      "id": "u1-l1-q09",
+      "prompt": "Stephen Curry is a great NBA player from the USA, and ____. Everyone likes him.",
+      "choices": ["he’s good at playing basketball", "he paints every day", "you can say that again", "look at that boy"],
+      "correctIndex": 0,
+      "explain": "承接前句描述球員 → 他很擅長打籃球。",
+      "tag": "dialog"
+    },
+    {
+      "id": "u1-l1-q10",
+      "prompt": "Ken: Who is young and handsome?  Bill: ____.",
+      "choices": ["Our new teacher, Mr. Chen, is.", "Isn’t that Mr. Chen?", "Mr. Chen isn’t.", "Our sister, Lisa, is."],
+      "correctIndex": 0,
+      "explain": "Wh- 問『誰』當主詞；答案用名詞片語 + is：Our new teacher, Mr. Chen, is.",
+      "tag": "dialog"
+    }
+  ]
+}
