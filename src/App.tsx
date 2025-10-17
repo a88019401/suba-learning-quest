@@ -33,11 +33,10 @@ import level3 from "./data/challenges/unit-1/level-3.json";
 import level4 from "./data/challenges/unit-1/level-4.json";
 // @ts-ignore
 import level5 from "./data/challenges/unit-1/level-5.json";*/
-import { AuthProvider, useAuth } from "./state/AuthContext"; // <-- 匯入 useAuth
+import {  useAuth } from "./state/AuthContext"; // <-- 匯入 useAuth
 import { supabase } from "./supabaseClient"; // <-- 匯入 supabase client
 import ProfileSetup from "./components/ProfileSetup";
 import Leaderboard from "./components/Leaderboard";
-import type { AuthSession } from "@supabase/supabase-js";
 /* -----------------------------
    類型（僅供本檔使用）
 ------------------------------ */
