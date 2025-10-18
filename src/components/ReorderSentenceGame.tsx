@@ -10,7 +10,8 @@ import {
   useDraggable,
 } from "@dnd-kit/core";
 import type { DragEndEvent } from "@dnd-kit/core";
-
+import { supabase } from "../supabaseClient"; 
+import { useAuth } from "../state/AuthContext"; 
 /* =========================
    Types
    ========================= */
@@ -235,6 +236,7 @@ const DraggablePiece: React.FC<{
    Main Component
    ========================= */
 export default function ReorderSentenceGame({ targets, onFinished }: Props) {
+  const { user, profile } = useAuth();
   /** ===== 句庫與回合 ===== */
   const roundsRef = useRef<string[] | null>(null);
   if (!roundsRef.current) {
@@ -496,6 +498,32 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
 
     // 回呼：用「消除行數」作為最終分數
     onFinished(linesCleared);
+    // ✅ --- 新增上傳排行榜的邏輯 ---
+    const uploadScore = async () => {
+      if (!user || !profile?.full_name) return;
+
+      try {
+        const { error: upsertError } = await supabase
+          .from('leaderboard')
+          .upsert({
+            user_id: user.id,
+            full_name: profile.full_name,
+            game: 'tetris', // 遊戲名稱設為 'tetris'
+            score: linesCleared, // 分數是消除的行數
+          }, {
+            onConflict: 'user_id,game',
+            ignoreDuplicates: false,
+          });
+
+        if (upsertError) throw upsertError;
+        console.log('Successfully upserted leaderboard for tetris!');
+      } catch (error) {
+        console.error('Error updating tetris leaderboard:', error);
+      }
+    };
+
+    uploadScore();
+    // ✅ --- 結束 ---
   }
 
   /* =========================
