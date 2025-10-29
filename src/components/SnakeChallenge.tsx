@@ -1,4 +1,4 @@
-// SnakeChallenge.tsx
+// src/components/SnakeChallenge.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Word } from "../types";
 import { Card, SectionTitle } from "./ui";
@@ -253,7 +253,6 @@ export default function SnakeChallenge({
         }
 
         // 吃到選項？
-        // 吃到選項？
         const hitIdx = foods.findIndex((f) => samePos(f.pos, head));
         if (hitIdx >= 0) {
           const hit = foods[hitIdx];
@@ -440,83 +439,101 @@ export default function SnakeChallenge({
       if (finishedRef.current) return;
       finishedRef.current = true;
 
-      const correct = finalScore ?? score;
-      const usedTime =
-        startTimeRef.current != null
-          ? Math.round((performance.now() - startTimeRef.current) / 1000)
-          : 0;
+      // 所有的狀態更新和 onFinish 都排到下一個事件循環，以避免 React 的渲染警告。
+      setTimeout(async () => {
+        const correct = finalScore ?? score;
+        const usedTime =
+          startTimeRef.current != null
+            ? Math.round((performance.now() - startTimeRef.current) / 1000)
+            : 0;
 
-      setUsedSec(usedTime);
-      setGameOver(true);
+        setUsedSec(usedTime);
+        setGameOver(true);
+        
+        // 🚨 這是 ResultModal 彈窗邏輯的依賴，需要儘早執行 onFinish
+        onFinish(correct, usedTime); 
 
-      onFinish(correct, usedTime);
-      // ✅ --- 新增上傳排行榜的邏輯 ---
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (user) {
-          // 從 profiles 表取得使用者姓名
-          const { data: profile, error: profileError } = await supabase
-            .from("profiles")
-            .select("full_name")
-            .eq("id", user.id)
-            .single();
-          if (profileError) throw profileError;
+        // --- 1. 日誌去重與準備 Report Data (Map-based de-duplication) ---
+        // 使用 Map 確保每個 round 只有一個日誌條目 (Map key = log.round)
+        const roundMap = new Map<number, SnakeRoundLog>();
+        logs.forEach(log => {
+            // 由於 logs 陣列是按時間順序追加，Map 會自動保留每個 round 的最後一筆記錄
+            roundMap.set(log.round, log);
+        });
+        const dedupedLogs = Array.from(roundMap.values());
+        
+        const wrongByTerm: Record<string, number> = {};
+        dedupedLogs.forEach((l) => {
+            if (!l.isCorrect)
+                wrongByTerm[l.selectedTerm] = (wrongByTerm[l.selectedTerm] || 0) + 1;
+        });
 
-          // upsert 會自動判斷是新增還是更新
-          const { error: upsertError } = await supabase
-            .from("leaderboard")
-            .upsert(
-              {
-                user_id: user.id,
-                full_name: profile.full_name,
-                game: "snake",
-                score: correct,
-              },
-              {
-                onConflict: "user_id,game", // 告訴 Supabase 檢查 user_id 和 game 的組合
-                ignoreDuplicates: false,
-              }
+        const reportData: SnakeReport = {
+            title,
+            totalQuestions: TOTAL,
+            passScore: TOTAL,
+            totalTime: usedTime,
+            usedTime,
+            correct,
+            wrong: dedupedLogs.filter((l) => !l.isCorrect).length,
+            passed: correct === TOTAL,
+            logs: dedupedLogs,
+            wrongByTerm,
+        };
+
+        // --- 2. 立即觸發 UI Modal (同步) ---
+        onReport?.(reportData); 
+
+        // --- 3. 觸發徽章事件 (同步) ---
+        try {
+            window.dispatchEvent(
+                new CustomEvent("learning-quest:snake-report", {
+                    detail: { correct, total: TOTAL },
+                })
             );
+        } catch {}
 
-          if (upsertError) throw upsertError;
-          console.log("Successfully upserted leaderboard for snake!");
+        // --- 4. 執行耗時的 Supabase 上傳 (非同步) ---
+        try {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          if (user) {
+            // 從 profiles 表取得使用者姓名
+            const { data: profile, error: profileError } = await supabase
+              .from("profiles")
+              .select("full_name")
+              .eq("id", user.id)
+              .single();
+            if (profileError) throw profileError;
+
+            // upsert 會自動判斷是新增還是更新
+            const { error: upsertError } = await supabase
+              .from("leaderboard")
+              .upsert(
+                {
+                  user_id: user.id,
+                  full_name: profile.full_name,
+                  game: "snake",
+                  score: correct,
+                },
+                {
+                  onConflict: "user_id,game", // 告訴 Supabase 檢查 user_id 和 game 的組合
+                  ignoreDuplicates: false,
+                }
+              );
+
+            if (upsertError) throw upsertError;
+            console.log("Successfully upserted leaderboard for snake!");
+          }
+        } catch (error) {
+          console.error("Error updating leaderboard:", error);
         }
-      } catch (error) {
-        console.error("Error updating leaderboard:", error);
-      }
-      // ✅ --- 結束 ---
-      const wrongByTerm: Record<string, number> = {};
-      logs.forEach((l) => {
-        if (!l.isCorrect)
-          wrongByTerm[l.selectedTerm] = (wrongByTerm[l.selectedTerm] || 0) + 1;
-      });
-
-      onReport?.({
-        title,
-        totalQuestions: TOTAL,
-        passScore: TOTAL, // 僅供相容（這裡當作「滿分」）
-        totalTime: usedTime, // 沒有倒數，這裡用實際遊玩秒數
-        usedTime,
-        correct,
-        wrong: logs.filter((l) => !l.isCorrect).length,
-        passed: correct === TOTAL, // ✅ 全部答完且全對才算 passed=true
-        logs,
-        wrongByTerm,
-      });
-
-      // 🆕 之後做「貪吃蛇之王」會用到：正解數 ≥ 78 時頒章
-      try {
-        window.dispatchEvent(
-          new CustomEvent("learning-quest:snake-report", {
-            detail: { correct, total: TOTAL },
-          })
-        );
-      } catch {}
+      }, 0); // 使用 setTimeout(..., 0)
     },
     [logs, onFinish, onReport, score, title, TOTAL]
   );
+
 
   const reset = useCallback(() => {
     finishedRef.current = false;
@@ -648,7 +665,7 @@ export default function SnakeChallenge({
           />
         </div>
 
-        <div className="flex flex-col items-center gap-3">
+<div className="flex flex-col items-center gap-3">
           <div className="text-xl font-semibold">得分（正確題數）：{score}</div>
           {!started ? (
             <button
@@ -661,12 +678,19 @@ export default function SnakeChallenge({
             >
               開始挑戰
             </button>
-          ) : (
+          ) : !gameOver ? ( // <== 遊戲進行中
             <button
               onClick={reset}
               className="px-4 py-2 rounded-xl border text-sm hover:bg-neutral-50"
             >
               重新開始
+            </button>
+          ) : ( // <== 遊戲結束時：改成可點擊的「再玩一次」按鈕
+            <button 
+              onClick={reset} // <--- 點擊後直接重置
+              className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm hover:opacity-90"
+            >
+              再玩一次
             </button>
           )}
           {DPad}
@@ -675,48 +699,6 @@ export default function SnakeChallenge({
           </p>
         </div>
       </div>
-
-      {/* 結算 */}
-      {gameOver && (
-        <div className="mt-5 p-4 rounded-2xl bg-neutral-50 border">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-lg font-semibold">🎮 遊戲結束</div>
-              <div className="text-sm text-neutral-600">
-                成績：{score} / {TOTAL}（用時 {usedSec}s）
-              </div>
-            </div>
-            <button
-              onClick={reset}
-              className="px-4 py-2 rounded-xl border text-sm hover:bg-white"
-            >
-              再玩一次
-            </button>
-          </div>
-
-          {/* 小獎勵／學習診斷提示 */}
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="p-3 rounded-xl bg-white border">
-              <div className="text-sm font-medium">🎯 準確度</div>
-              <div className="mt-1 text-xl font-semibold">
-                {Math.round((score / TOTAL) * 100)}%
-              </div>
-            </div>
-            <div className="p-3 rounded-xl bg-white border">
-              <div className="text-sm font-medium">🏅 目標挑戰</div>
-              <div className="mt-1 text-sm text-neutral-700">
-                {score === TOTAL
-                  ? "全對！你是詞彙傳奇！"
-                  : `再挑戰看看 ${TOTAL}/${TOTAL} 全對！`}
-              </div>
-            </div>
-            <div className="p-3 rounded-xl bg-white border">
-              <div className="text-sm font-medium">⏳ 本局耗時</div>
-              <div className="mt-1 text-xl font-semibold">{usedSec}s</div>
-            </div>
-          </div>
-        </div>
-      )}
     </Card>
   );
 }
