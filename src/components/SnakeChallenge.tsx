@@ -449,48 +449,50 @@ export default function SnakeChallenge({
 
         setUsedSec(usedTime);
         setGameOver(true);
-        
+        console.log(`[SnakeChallenge] Game ended. Time used: ${usedTime}s`);
+
         // 🚨 這是 ResultModal 彈窗邏輯的依賴，需要儘早執行 onFinish
-        onFinish(correct, usedTime); 
+        onFinish(correct, usedTime);
 
         // --- 1. 日誌去重與準備 Report Data (Map-based de-duplication) ---
         // 使用 Map 確保每個 round 只有一個日誌條目 (Map key = log.round)
         const roundMap = new Map<number, SnakeRoundLog>();
-        logs.forEach(log => {
-            // 由於 logs 陣列是按時間順序追加，Map 會自動保留每個 round 的最後一筆記錄
-            roundMap.set(log.round, log);
+        logs.forEach((log) => {
+          // 由於 logs 陣列是按時間順序追加，Map 會自動保留每個 round 的最後一筆記錄
+          roundMap.set(log.round, log);
         });
         const dedupedLogs = Array.from(roundMap.values());
-        
+
         const wrongByTerm: Record<string, number> = {};
         dedupedLogs.forEach((l) => {
-            if (!l.isCorrect)
-                wrongByTerm[l.selectedTerm] = (wrongByTerm[l.selectedTerm] || 0) + 1;
+          if (!l.isCorrect)
+            wrongByTerm[l.selectedTerm] =
+              (wrongByTerm[l.selectedTerm] || 0) + 1;
         });
 
         const reportData: SnakeReport = {
-            title,
-            totalQuestions: TOTAL,
-            passScore: TOTAL,
-            totalTime: usedTime,
-            usedTime,
-            correct,
-            wrong: dedupedLogs.filter((l) => !l.isCorrect).length,
-            passed: correct === TOTAL,
-            logs: dedupedLogs,
-            wrongByTerm,
+          title,
+          totalQuestions: TOTAL,
+          passScore: TOTAL,
+          totalTime: usedTime,
+          usedTime,
+          correct,
+          wrong: dedupedLogs.filter((l) => !l.isCorrect).length,
+          passed: correct === TOTAL,
+          logs: dedupedLogs,
+          wrongByTerm,
         };
 
         // --- 2. 立即觸發 UI Modal (同步) ---
-        onReport?.(reportData); 
+        onReport?.(reportData);
 
         // --- 3. 觸發徽章事件 (同步) ---
         try {
-            window.dispatchEvent(
-                new CustomEvent("learning-quest:snake-report", {
-                    detail: { correct, total: TOTAL },
-                })
-            );
+          window.dispatchEvent(
+            new CustomEvent("learning-quest:snake-report", {
+              detail: { correct, total: TOTAL },
+            })
+          );
         } catch {}
 
         // --- 4. 執行耗時的 Supabase 上傳 (非同步) ---
@@ -533,7 +535,6 @@ export default function SnakeChallenge({
     },
     [logs, onFinish, onReport, score, title, TOTAL]
   );
-
 
   const reset = useCallback(() => {
     finishedRef.current = false;
@@ -665,8 +666,13 @@ export default function SnakeChallenge({
           />
         </div>
 
-<div className="flex flex-col items-center gap-3">
+        <div className="flex flex-col items-center gap-3">
           <div className="text-xl font-semibold">得分（正確題數）：{score}</div>
+          {gameOver && (
+            <div className="text-sm text-neutral-500">
+              本局耗時：{usedSec} 秒
+            </div>
+          )}
           {!started ? (
             <button
               onClick={() => {
@@ -685,8 +691,9 @@ export default function SnakeChallenge({
             >
               重新開始
             </button>
-          ) : ( // <== 遊戲結束時：改成可點擊的「再玩一次」按鈕
-            <button 
+          ) : (
+            // <== 遊戲結束時：改成可點擊的「再玩一次」按鈕
+            <button
               onClick={reset} // <--- 點擊後直接重置
               className="px-4 py-2 rounded-xl bg-neutral-900 text-white text-sm hover:opacity-90"
             >
