@@ -282,61 +282,233 @@ function ResultModal({
     </div>
   );
 }
-// 【新增一個登入元件】
+// 【登入元件】
+// 直接用這段覆蓋你現在的 AuthGate 定義即可
 function AuthGate() {
-  const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const resetMessages = () => {
+    setError(null);
+    setMessage(null);
+  };
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    resetMessages();
+
+    if (mode === "signup") {
+      if (password.length < 6) {
+        setError("密碼至少需 6 個字元。");
+        return;
+      }
+      if (password !== confirm) {
+        setError("兩次輸入的密碼不一致。");
+        return;
+      }
+    }
+
+    setLoading(true);
     try {
-      setLoading(true);
-      const { error } = await supabase.auth.signInWithOtp({ email });
-      if (error) throw error;
-      alert("請檢查您的電子郵件信箱，點擊登入連結！");
-    } catch (error: any) {
-      alert(error.error_description || error.message);
+      if (mode === "signup") {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            // 使用你的站點網址作為驗證後回跳位置
+            emailRedirectTo: `${window.location.origin}/`,
+          },
+        });
+        if (error) throw error;
+        setMessage("註冊成功！請到信箱完成驗證，再回來登入。");
+        setMode("signin");
+        setPassword("");
+        setConfirm("");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+        // 成功登入後，外層的 AuthProvider / onAuthStateChange 會接手，頁面會自動切到主介面
+      }
+    } catch (err: any) {
+      // 常見：Invalid login credentials / Email not confirmed 等
+      const msg =
+        err?.message ||
+        err?.error_description ||
+        "發生未知錯誤，請稍後再試。";
+      setError(msg);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleResetPassword = async () => {
+    resetMessages();
+    if (!email) {
+      setError("請先在上方輸入要重設密碼的 Email。");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/`,
+      });
+      if (error) throw error;
+      setMessage("已寄出重設密碼信件，請至信箱查看。");
+    } catch (err: any) {
+      const msg =
+        err?.message ||
+        err?.error_description ||
+        "寄送失敗，請稍後再試。";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const switchMode = () => {
+    setMode((m) => (m === "signin" ? "signup" : "signin"));
+    resetMessages();
+    setPassword("");
+    setConfirm("");
   };
 
   return (
     <div className="min-h-screen bg-neutral-100 flex items-center justify-center">
       <div className="w-full max-w-sm p-8 space-y-6 bg-white rounded-2xl shadow-lg border">
         <div>
-          <h1 className="text-2xl font-bold">登入 LearningQuest</h1>
+          <h1 className="text-2xl font-bold">
+            {mode === "signin" ? "登入 LearningQuest" : "註冊 LearningQuest"}
+          </h1>
           <p className="text-sm text-neutral-500 mt-1">
-            請輸入您的電子郵件以接收登入連結。
+            {mode === "signin"
+              ? "請輸入 Email 與密碼以登入。"
+              : "請輸入 Email 與密碼以建立帳號。"}
           </p>
         </div>
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label htmlFor="email" className="sr-only">
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            {error}
+          </div>
+        )}
+        {message && (
+          <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+            {message}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="email" className="text-sm font-medium">
               Email
             </label>
             <input
               id="email"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="your.email@example.com"
-              className="w-full px-4 py-2 border rounded-xl"
+              className="w-full px-4 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-400"
             />
           </div>
+
+          <div className="space-y-2">
+            <label htmlFor="password" className="text-sm font-medium">
+              密碼
+            </label>
+            <div className="relative">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                placeholder={mode === "signup" ? "至少 6 個字元" : "請輸入密碼"}
+                className="w-full px-4 py-2 border rounded-xl pr-12 focus:outline-none focus:ring-2 focus:ring-neutral-400"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-neutral-500 hover:text-neutral-700"
+                aria-label={showPassword ? "隱藏密碼" : "顯示密碼"}
+              >
+                {showPassword ? "隱藏" : "顯示"}
+              </button>
+            </div>
+            {mode === "signup" && (
+              <p className="text-xs text-neutral-500">
+                建議包含大小寫字母與數字，提升安全性。
+              </p>
+            )}
+          </div>
+
+          {mode === "signup" && (
+            <div className="space-y-2">
+              <label htmlFor="confirm" className="text-sm font-medium">
+                確認密碼
+              </label>
+              <input
+                id="confirm"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                required
+                placeholder="請再次輸入密碼"
+                className="w-full px-4 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-400"
+              />
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
             className="w-full px-4 py-2 text-white bg-neutral-900 rounded-xl disabled:opacity-50"
           >
-            {loading ? "傳送中..." : "傳送登入連結"}
+            {loading
+              ? "處理中..."
+              : mode === "signin"
+              ? "登入"
+              : "建立帳號"}
           </button>
         </form>
+
+        <div className="flex items-center justify-between text-sm">
+          <button
+            type="button"
+            onClick={switchMode}
+            className="text-neutral-700 hover:underline"
+          >
+            {mode === "signin" ? "沒有帳號？前往註冊" : "已有帳號？前往登入"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetPassword}
+            disabled={loading}
+            className="text-neutral-500 hover:underline disabled:opacity-50"
+            title="會寄送重設密碼連結至上方 Email"
+          >
+            忘記密碼？
+          </button>
+        </div>
       </div>
     </div>
   );
 }
+
 /* -----------------------------
    App
 ------------------------------ */
