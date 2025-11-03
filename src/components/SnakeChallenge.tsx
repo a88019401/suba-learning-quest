@@ -509,24 +509,44 @@ export default function SnakeChallenge({
               .single();
             if (profileError) throw profileError;
 
-            // upsert 會自動判斷是新增還是更新
-            const { error: upsertError } = await supabase
-              .from("leaderboard")
-              .upsert(
-                {
-                  user_id: user.id,
-                  full_name: profile.full_name,
-                  game: "snake",
-                  score: correct,
-                },
-                {
-                  onConflict: "user_id,game", // 告訴 Supabase 檢查 user_id 和 game 的組合
-                  ignoreDuplicates: false,
-                }
-              );
+            // ✅ 【修改重點】開始：先讀取目前分數
+            const { data: existingEntry, error: selectError } = await supabase
+              .from('leaderboard')
+              .select('score')
+              .eq('user_id', user.id)
+              .eq('game', 'snake')
+              .single();
 
-            if (upsertError) throw upsertError;
-            console.log("Successfully upserted leaderboard for snake!");
+            // 如果查詢出錯（且不是「找不到資料」的錯誤），就拋出錯誤
+            if (selectError && selectError.code !== 'PGRST116') {
+                throw selectError;
+            }
+
+            const currentScore = existingEntry?.score ?? 0;
+
+            // 只有在新分數更高時才更新
+            if (correct > currentScore) {
+                const { error: upsertError } = await supabase
+                  .from("leaderboard")
+                  .upsert(
+                    {
+                      user_id: user.id,
+                      full_name: profile.full_name,
+                      game: "snake",
+                      score: correct,
+                    },
+                    {
+                      onConflict: "user_id,game",
+                      ignoreDuplicates: false,
+                    }
+                  );
+
+                if (upsertError) throw upsertError;
+                console.log("Successfully upserted new high score for snake!");
+            } else {
+                console.log("New score is not higher. No update needed for snake.");
+            }
+            // ✅ 【修改重點】結束
           }
         } catch (error) {
           console.error("Error updating leaderboard:", error);

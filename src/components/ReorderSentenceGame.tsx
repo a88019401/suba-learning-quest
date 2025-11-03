@@ -513,7 +513,7 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
     setBag([]);
   }
 
-  function endGame(reason: GameOverReason) {
+function endGame(reason: GameOverReason) {
     if (gameOver) return;
     setGameOver({ reason });
 
@@ -544,19 +544,39 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
     const uploadScore = async () => {
       if (!user || !profile?.full_name) return;
       try {
-        const { error: upsertError } = await supabase
-          .from("leaderboard")
-          .upsert(
-            {
-              user_id: user.id,
-              full_name: profile.full_name,
-              game: "tetris",
-              score: linesCleared,
-            },
-            { onConflict: "user_id,game", ignoreDuplicates: false }
-          );
-        if (upsertError) throw upsertError;
-        console.log("Successfully upserted leaderboard for tetris!");
+        // ✅ 【修改重點】開始：先讀取目前分數
+        const { data: existingEntry, error: selectError } = await supabase
+          .from('leaderboard')
+          .select('score')
+          .eq('user_id', user.id)
+          .eq('game', 'tetris')
+          .single();
+
+        if (selectError && selectError.code !== 'PGRST116') { // PGRST116 is "No rows found"
+            throw selectError;
+        }
+
+        const currentScore = existingEntry?.score ?? 0;
+
+        // 只有在新分數更高時才更新
+        if (linesCleared > currentScore) {
+            const { error: upsertError } = await supabase
+              .from("leaderboard")
+              .upsert(
+                {
+                  user_id: user.id,
+                  full_name: profile.full_name,
+                  game: "tetris",
+                  score: linesCleared,
+                },
+                { onConflict: "user_id,game", ignoreDuplicates: false }
+              );
+            if (upsertError) throw upsertError;
+            console.log("Successfully upserted new high score for tetris!");
+        } else {
+            console.log("New score is not higher. No update needed for tetris.");
+        }
+        // ✅ 【修改重點】結束
       } catch (error) {
         console.error("Error updating tetris leaderboard:", error);
       }
