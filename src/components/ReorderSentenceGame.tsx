@@ -1,17 +1,19 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { Card, SectionTitle } from "./ui";
 import {
-   DndContext,
-   MouseSensor,
+  DndContext,
+  MouseSensor,
   TouchSensor,
   useSensor,
   useSensors,
   useDroppable,
   useDraggable,
+  DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent } from "@dnd-kit/core";
-import { supabase } from "../supabaseClient"; 
-import { useAuth } from "../state/AuthContext"; 
+import type { DragStartEvent, DragMoveEvent, DragEndEvent } from "@dnd-kit/core";
+import { supabase } from "../supabaseClient";
+import { useAuth } from "../state/AuthContext";
+
 /* =========================
    Types
    ========================= */
@@ -28,6 +30,12 @@ type Piece = {
 
 type GameOverReason = "wrong-limit" | "no-fit" | "completed";
 
+// 預覽格子顏色
+type PreviewCell = "empty" | "valid" | "invalid";
+
+/* =========================
+   Constants
+   ========================= */
 const GRID = 10;
 const WRONG_LIMIT = 3;
 const STORAGE_KEY = "lq:grammar-tetris:logs";
@@ -35,10 +43,9 @@ const STORAGE_KEY = "lq:grammar-tetris:logs";
 /* =========================
    Utils
    ========================= */
-// 把句子切成詞與標點：Hello, world! → ["Hello", ",", "world", "!"]
 function tokenize(sentence: string): string[] {
   const s = sentence.trim().replace(/\s+/g, " ");
-  const tokens = s.match(/[\w’']+|[^\s]/g); // 單字(含 ' ’) 或任何非空白字元（標點）
+  const tokens = s.match(/[\w’']+|[^\s]/g);
   return tokens ?? [s];
 }
 function shuffle<T>(arr: T[]): T[] {
@@ -51,7 +58,7 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 /* =========================
-   靜態俄羅斯方塊（1010! 規則）
+   Tetrominoes (1010! 風格)
    ========================= */
 const TETROMINOES: Record<string, Array<[number, number]>> = {
   I: [
@@ -98,7 +105,6 @@ const TETROMINOES: Record<string, Array<[number, number]>> = {
   ],
 };
 function rotate90(cells: Array<[number, number]>): Array<[number, number]> {
-  // (x, y) -> (y, -x) 之後正規化
   const rotated = cells.map(([x, y]) => [y, -x] as [number, number]);
   const minX = Math.min(...rotated.map(([x]) => x));
   const minY = Math.min(...rotated.map(([, y]) => y));
@@ -188,9 +194,11 @@ const DraggablePiece: React.FC<{
   disabled?: boolean;
   selected?: boolean;
   onSelect?: () => void;
-}> = ({ piece, disabled, selected, onSelect }) => {
+  isGhost?: boolean; // 拖曳浮層用
+}> = ({ piece, disabled, selected, onSelect, isGhost }) => {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: piece.id, disabled });
+
   return (
     <button
       ref={setNodeRef}
@@ -201,11 +209,13 @@ const DraggablePiece: React.FC<{
         "inline-block p-2 rounded-2xl border bg-white shadow-sm select-none " +
         (disabled ? "opacity-40 cursor-not-allowed " : "cursor-grab ") +
         (selected ? "ring-2 ring-neutral-900 " : "") +
-        (isDragging ? "opacity-70 " : "")
+        (isGhost ? "opacity-0 " : isDragging ? "opacity-0 " : "")
       }
       aria-roledescription="draggable-piece"
       style={{
-        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+        transform: transform
+          ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+          : undefined,
         touchAction: "none",
       }}
     >
@@ -232,17 +242,34 @@ const DraggablePiece: React.FC<{
   );
 };
 
+// 預覽格子
+const PreviewCell: React.FC<{ status: PreviewCell }> = ({ status }) => {
+  let className = "w-7 h-7 rounded-md ";
+  switch (status) {
+    case "valid":
+      className += "bg-green-500 opacity-70";
+      break;
+    case "invalid":
+      className += "bg-red-500 opacity-70";
+      break;
+    default:
+      className += "bg-transparent";
+  }
+  return <div className={className} />;
+};
+
 /* =========================
    Main Component
    ========================= */
 export default function ReorderSentenceGame({ targets, onFinished }: Props) {
   const { user, profile } = useAuth();
+
   /** ===== 句庫與回合 ===== */
   const roundsRef = useRef<string[] | null>(null);
   if (!roundsRef.current) {
     roundsRef.current = shuffle(targets);
   }
-  const rounds = roundsRef.current!; // 固定本輪題庫
+  const rounds = roundsRef.current!;
   const total = rounds.length;
   const [roundIdx, setRoundIdx] = useState(0);
 
@@ -256,16 +283,16 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
     return shuffled;
   });
   const [picked, setPicked] = useState<string[]>([]);
-  const [checked, setChecked] = useState<null | boolean>(null); // null: 未繳交, true/false: 判定結果
-  const [showKnowBtn, setShowKnowBtn] = useState(false); // 錯誤時顯示「知道了」
+  const [checked, setChecked] = useState<null | boolean>(null);
+  const [showKnowBtn, setShowKnowBtn] = useState(false);
 
   /** ===== 棋盤 & 方塊 ===== */
   const [board, setBoard] = useState<Board>(() => emptyBoard());
-  const [bag, setBag] = useState<Piece[]>([]); // 每題正確才發三塊
+  const [bag, setBag] = useState<Piece[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
 
   /** ===== 計分與終止條件 ===== */
-  const [linesCleared, setLinesCleared] = useState(0); // 總分：累積消除行／列數
+  const [linesCleared, setLinesCleared] = useState(0);
   const [wrongCount, setWrongCount] = useState(0);
   const [wrongItems, setWrongItems] = useState<
     Array<{ question: string; correct: string }>
@@ -274,137 +301,162 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
     null
   );
 
-  /** ===== DnD sensors（只宣告一次） ===== */
- const sensors = useSensors(
-   // 滑鼠：拖動距離 5px 之後才啟動
-   useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-   // 觸控：長按 120ms + 容忍位移 8px 之後才啟動，減少誤觸
-   useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } })
- );
+  /** ===== DnD sensors ===== */
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 120, tolerance: 8 },
+    })
+  );
 
-  /** ===== 階段：arrange（重組） or puzzle（方塊） ===== */
+  /** ===== 拖曳狀態（Ghost + 預覽） ===== */
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<{ r: number; c: number } | null>(null);
+  const activePiece = useMemo(
+    () => (activeId ? bag.find((p) => p.id === activeId) : null),
+    [activeId, bag]
+  );
+
+  /** ===== 階段 ===== */
   const phase: "arrange" | "puzzle" =
     bag.length > 0 ? "puzzle" : checked === true ? "puzzle" : "arrange";
 
   /* =========================
-     Board / Clear / Fit
+     發三塊 & 先驗證是否能放
      ========================= */
-  function place(piece: Piece, r: number, c: number) {
-    setBoard((prev) => {
-      const next = prev.map((row) => [...row]);
-      piece.cells.forEach(([x, y]) => {
-        next[r + y][c + x] = 1;
-      });
-      return next;
-    });
-
-    // 消除，並累計分數（行/列數）
-    setBoard((prev) => {
-      let next = prev.map((row) => [...row]);
-      const fullRows: number[] = [];
-      const fullCols: number[] = [];
-      for (let rr = 0; rr < GRID; rr++)
-        if (next[rr].every((v) => v === 1)) fullRows.push(rr);
-      for (let cc = 0; cc < GRID; cc++) {
-        let ok = true;
-        for (let rr = 0; rr < GRID; rr++)
-          if (next[rr][cc] === 0) {
-            ok = false;
-            break;
-          }
-        if (ok) fullCols.push(cc);
-      }
-      const cleared = fullRows.length + fullCols.length;
-      if (cleared > 0) {
-        for (const rr of fullRows)
-          next[rr] = Array.from({ length: GRID }, () => 0);
-        for (const cc of fullCols)
-          for (let rr = 0; rr < GRID; rr++) next[rr][cc] = 0;
-        setLinesCleared((x) => x + cleared);
-      }
-      return next;
-    });
-  }
-
   function dealThreePiecesAndCheckFit() {
     const pieces = [makeRandomPiece(), makeRandomPiece(), makeRandomPiece()];
     setBag(pieces);
     setSelected(null);
-    // 8/9：若完全無處可放，立即遊戲結束
     if (!hasAnyPlacement(board, pieces)) {
       endGame("no-fit");
     }
   }
 
-  function afterPlacedUpdate(restCount: number) {
-    if (restCount === 0) {
-      // 三塊都放完 → 進下一題（若已是最後一題則完成）
-      advanceToNextQuestion();
-    } else {
-      // 尚有方塊：偵測是否還能塞（8/9）
-      const restPieces = bag.filter((p) =>
-        restCount === bag.length ? true : p.id !== selected
-      ); // 保守處理
-      const piecesToCheck = restPieces.length ? restPieces : bag;
-      if (!hasAnyPlacement(board, piecesToCheck)) {
+  /* =========================
+     place：單次只計一次、同步判定 no-fit
+     ========================= */
+  function place(piece: Piece, r: number, c: number, remainingPieces: Piece[]) {
+    // 用當前 board 快照計算
+    const placed = board.map((row) => [...row]);
+    piece.cells.forEach(([x, y]) => {
+      const rr = r + y,
+        cc = c + x;
+      if (rr >= 0 && rr < GRID && cc >= 0 && cc < GRID) placed[rr][cc] = 1;
+    });
+
+    // 找滿行 / 滿列
+    const fullRows: number[] = [];
+    for (let rr = 0; rr < GRID; rr++) {
+      if (placed[rr].every((v) => v === 1)) fullRows.push(rr);
+    }
+    const fullCols: number[] = [];
+    for (let cc = 0; cc < GRID; cc++) {
+      let ok = true;
+      for (let rr = 0; rr < GRID; rr++) {
+        if (placed[rr][cc] === 0) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) fullCols.push(cc);
+    }
+
+    // 清空並計分
+    const cleared = placed.map((row) => [...row]);
+    for (const rr of fullRows) {
+      cleared[rr] = Array.from({ length: GRID }, () => 0);
+    }
+    for (const cc of fullCols) {
+      for (let rr = 0; rr < GRID; rr++) {
+        cleared[rr][cc] = 0;
+      }
+    }
+    const gained = fullRows.length + fullCols.length; // 行 + 列；同時有就 +2
+
+    // 只做一次 setState，避免 StrictMode 加倍
+    setBoard(cleared);
+    if (gained) setLinesCleared((x) => x + gained);
+
+    // ★ 關鍵：放完當下，用「清除後的棋盤」檢查剩餘 pieces 是否還能放
+    if (remainingPieces.length > 0) {
+      if (!hasAnyPlacement(cleared, remainingPieces)) {
         endGame("no-fit");
       }
+    } else {
+      // 三顆都放完了，直接進下一題
+      advanceToNextQuestion();
     }
   }
 
   /* =========================
-     DnD handlers
+     DnD handlers（含 ghost 預覽）
      ========================= */
+  function onDragStart(e: DragStartEvent) {
+    setActiveId(String(e.active.id));
+    setHoveredCell(null);
+  }
+  function onDragMove(e: DragMoveEvent) {
+    if (!e.over) {
+      setHoveredCell(null);
+      return;
+    }
+    const id = String(e.over.id);
+    if (!id.startsWith("cell-")) {
+      setHoveredCell(null);
+      return;
+    }
+    const [r, c] = id.replace("cell-", "").split("-").map(Number);
+    setHoveredCell({ r, c });
+  }
   function onDragEnd(e: DragEndEvent) {
+    setActiveId(null);
+    setHoveredCell(null);
     if (!e.active || !e.over) return;
-    const piece = bag.find((p) => p.id === e.active.id);
+
+    const pieceId = String(e.active.id);
+    const piece = bag.find((p) => p.id === pieceId);
     if (!piece) return;
+
     const id = String(e.over.id);
     if (!id.startsWith("cell-")) return;
+
     const [r, c] = id.replace("cell-", "").split("-").map(Number);
-    if (canPlaceOn(board, piece, r, c)) {
-      place(piece, r, c);
-      setBag((prev) => {
-        const rest = prev.filter((p) => p.id !== piece.id);
-        setTimeout(() => afterPlacedUpdate(rest.length), 50);
-        return rest;
-      });
-      setSelected(null);
-    }
+    if (!canPlaceOn(board, piece, r, c)) return;
+
+    // 僅讓第一次觸發的放置生效，避免快速重複
+    setBag((prev) => {
+      if (!prev.some((p) => p.id === pieceId)) return prev;
+      const remaining = prev.filter((p) => p.id !== pieceId);
+      place(piece, r, c, remaining); // ★ 放下去並立即判定剩餘 pieces 是否可放
+      return remaining;
+    });
+    setSelected(null);
   }
+
+  /* =========================
+     也支援點格子放置（非拖曳）
+     ========================= */
   function onCellClick(r: number, c: number) {
     if (!selected) return;
     const piece = bag.find((p) => p.id === selected);
     if (!piece) return;
-    if (canPlaceOn(board, piece, r, c)) {
-      place(piece, r, c);
-      setBag((prev) => {
-        const rest = prev.filter((p) => p.id !== selected);
-        setTimeout(() => afterPlacedUpdate(rest.length), 50);
-        return rest;
-      });
-      setSelected(null);
-    }
+    if (!canPlaceOn(board, piece, r, c)) return;
+
+    setBag((prev) => {
+      if (!prev.some((p) => p.id === piece.id)) return prev;
+      const remaining = prev.filter((p) => p.id !== piece.id);
+      place(piece, r, c, remaining);
+      return remaining;
+    });
+    setSelected(null);
   }
 
   /* =========================
-     Grammar handlers
+     Grammar handlers（略）
      ========================= */
-  /*
-  function reshuffleTokens() {
-    // 只打亂字卡；不動棋盤
-    setTray(() => {
-      let shuffled = shuffle(answerTokens);
-      if (shuffled.join("|") === answerTokens.join("|")) shuffled = shuffle(answerTokens);
-      return shuffled;
-    });
-    setPicked([]);
-    setChecked(null);
-    setShowKnowBtn(false);
-  }*/
-
   function pickToken(t: string, idx: number) {
-    if (phase === "puzzle") return; // 解鎖後先完成放 3 塊
+    if (phase === "puzzle") return;
     setPicked((prev) => [...prev, t]);
     setTray((arr) => arr.filter((_, i) => i !== idx));
   }
@@ -413,7 +465,6 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
     setTray((arr) => [...arr, picked[idx]]);
     setPicked((p) => p.filter((_, i) => i !== idx));
   }
-
   function submit() {
     if (phase === "puzzle") return;
     if (checked !== null) return;
@@ -422,29 +473,21 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
       picked.every((t, i) => t === answerTokens[i]);
     setChecked(ok);
     if (ok) {
-      // 3. 正確 → 發三塊，進入 puzzle 階段
       dealThreePiecesAndCheckFit();
     } else {
-      // 5. 錯誤 → 紅色 UI + 立刻顯示正解 + 「知道了」按鈕
       setShowKnowBtn(true);
-      setWrongCount((n) => {
-        const next = n + 1;
-        return next;
-      });
+      setWrongCount((n) => n + 1);
       setWrongItems((list) => [
         ...list,
         { question: current, correct: answerTokens.join(" ") },
       ]);
     }
   }
-
   function knowAndNext() {
-    // 若錯題達上限，立即結束（7）
     if (wrongCount >= WRONG_LIMIT) {
       endGame("wrong-limit");
       return;
     }
-    // 否則進下一題
     advanceToNextQuestion();
   }
 
@@ -467,14 +510,13 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
     setChecked(null);
     setShowKnowBtn(false);
     setSelected(null);
-    setBag([]); // 等下一題再正確才發 3 塊
+    setBag([]);
   }
 
   function endGame(reason: GameOverReason) {
-    if (gameOver) return; // 保險：避免重複收尾
+    if (gameOver) return;
     setGameOver({ reason });
 
-    // 10. 可記錄的狀態（localStorage + CustomEvent）
     const report = {
       timestamp: new Date().toISOString(),
       roundsPlayed: roundIdx + 1,
@@ -496,44 +538,31 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
       );
     } catch {}
 
-    // 回呼：用「消除行數」作為最終分數
     onFinished(linesCleared);
-    // ✅ --- 新增上傳排行榜的邏輯 ---
+
+    // 上傳排行榜
     const uploadScore = async () => {
       if (!user || !profile?.full_name) return;
-
       try {
         const { error: upsertError } = await supabase
-          .from('leaderboard')
-          .upsert({
-            user_id: user.id,
-            full_name: profile.full_name,
-            game: 'tetris', // 遊戲名稱設為 'tetris'
-            score: linesCleared, // 分數是消除的行數
-          }, {
-            onConflict: 'user_id,game',
-            ignoreDuplicates: false,
-          });
-
+          .from("leaderboard")
+          .upsert(
+            {
+              user_id: user.id,
+              full_name: profile.full_name,
+              game: "tetris",
+              score: linesCleared,
+            },
+            { onConflict: "user_id,game", ignoreDuplicates: false }
+          );
         if (upsertError) throw upsertError;
-        console.log('Successfully upserted leaderboard for tetris!');
+        console.log("Successfully upserted leaderboard for tetris!");
       } catch (error) {
-        console.error('Error updating tetris leaderboard:', error);
+        console.error("Error updating tetris leaderboard:", error);
       }
     };
-
     uploadScore();
-    // ✅ --- 結束 ---
   }
-
-  /* =========================
-     Reset board
-     ========================= */
-  /*function resetBoard() {
-    setBoard(emptyBoard());
-    // 不重置分數與錯題，純粹清盤
-    // 若當前 bag 無可放置，下一次發牌（答對）還是會檢查終止條件
-  }*/
 
   /* =========================
      Effects：錯題上限即終止
@@ -546,72 +575,26 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
   }, [wrongCount]);
 
   /* =========================
-     End Modal
+     預覽棋盤（紅/綠 Ghost）
      ========================= */
-  const EndModal = gameOver ? (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="w-full max-w-xl rounded-2xl bg-white border shadow-lg p-5">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 rounded-full bg-neutral-900 text-white flex items-center justify-center text-lg">
-            ★
-          </div>
-          <div className="text-lg font-semibold">
-            {gameOver.reason === "completed" && "本輪完成"}
-            {gameOver.reason === "no-fit" && "遊戲結束（無可放置）"}
-            {gameOver.reason === "wrong-limit" && "遊戲結束（錯題達上限）"}
-          </div>
-        </div>
-        <div className="text-sm text-neutral-700">
-          總共消除行／列：<b>{linesCleared}</b>
-        </div>
+  const previewBoard = useMemo((): PreviewCell[][] => {
+    const grid = Array.from({ length: GRID }, () =>
+      Array.from({ length: GRID }, () => "empty" as PreviewCell)
+    );
+    if (!activePiece || !hoveredCell) return grid;
 
-        {wrongItems.length > 0 && (
-          <div className="mt-3">
-            <div className="text-sm font-medium mb-1">錯誤題目與正解：</div>
-            <div className="max-h-64 overflow-auto space-y-2 pr-1">
-              {wrongItems.map((w, i) => (
-                <div key={i} className="p-2 rounded-xl border bg-neutral-50">
-                  <div className="text-xs text-neutral-500">題目</div>
-                  <div className="text-sm">{w.question}</div>
-                  <div className="mt-1 text-xs text-neutral-500">正解</div>
-                  <div className="text-sm font-medium">{w.correct}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="mt-4 flex gap-2 justify-end">
-          <button
-            onClick={() => {
-              // 重新開始：清盤、清錯題、保留同一題庫流程
-              setRoundIdx(0);
-              const firstAns = tokenize(rounds[0] ?? "");
-              let shuffled = shuffle(firstAns);
-              if (shuffled.join("|") === firstAns.join("|"))
-                shuffled = shuffle(firstAns);
-              setTray(shuffled);
-              setPicked([]);
-              setChecked(null);
-              setShowKnowBtn(false);
-
-              setBoard(emptyBoard());
-              setBag([]);
-              setSelected(null);
-
-              setLinesCleared(0);
-              setWrongCount(0);
-              setWrongItems([]);
-              setGameOver(null);
-            }}
-            className="px-4 py-2 rounded-xl bg-neutral-900 text-white hover:opacity-90"
-          >
-            重新開始
-          </button>
-        </div>
-      </div>
-    </div>
-  ) : null;
+    const { r, c } = hoveredCell;
+    const ok = canPlaceOn(board, activePiece, r, c);
+    const status: PreviewCell = ok ? "valid" : "invalid";
+    activePiece.cells.forEach(([x, y]) => {
+      const rr = r + y,
+        cc = c + x;
+      if (rr >= 0 && rr < GRID && cc >= 0 && cc < GRID) {
+        grid[rr][cc] = status;
+      }
+    });
+    return grid;
+  }, [activePiece, hoveredCell, board]);
 
   /* =========================
      UI Layout
@@ -638,8 +621,12 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
           </div>
         </div>
 
-        {/* 棋盤 + 托盤 */}
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          onDragStart={onDragStart}
+          onDragMove={onDragMove}
+          onDragEnd={onDragEnd}
+        >
           <div className="flex flex-col lg:flex-row gap-4">
             {/* 棋盤 */}
             <div className="relative p-3 rounded-2xl border" style={{ touchAction: "none" }}>
@@ -652,6 +639,8 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
                   </div>
                 </div>
               )}
+
+              {/* 實際棋盤 */}
               <div
                 className="grid gap-1"
                 style={{ gridTemplateColumns: `repeat(${GRID}, 1.75rem)` }}
@@ -669,6 +658,18 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
                       />
                     );
                   })
+                )}
+              </div>
+
+              {/* 預覽層（紅/綠 ghost） */}
+              <div
+                className="absolute inset-0 p-3 grid gap-1 pointer-events-none"
+                style={{ gridTemplateColumns: `repeat(${GRID}, 1.75rem)` }}
+              >
+                {Array.from({ length: GRID }).map((_, r) =>
+                  Array.from({ length: GRID }).map((_, c) => (
+                    <PreviewCell key={`prev-${r}-${c}`} status={previewBoard[r][c]} />
+                  ))
                 )}
               </div>
             </div>
@@ -690,15 +691,12 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
                     piece={p}
                     disabled={phase === "arrange"}
                     selected={selected === p.id}
-                    onSelect={() =>
-                      setSelected((sel) => (sel === p.id ? null : p.id))
-                    }
+                    onSelect={() => setSelected((sel) => (sel === p.id ? null : p.id))}
                   />
                 ))}
               </div>
 
               <div className="mt-3 flex items-center gap-2">
-                {/*<button onClick={resetBoard} className="px-3 py-1.5 rounded-xl border">重置棋盤</button>*/}
                 {selected && (
                   <span className="text-xs text-neutral-500">
                     已選取：點棋盤格放置；或拖曳到棋盤。
@@ -707,10 +705,15 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
               </div>
             </div>
           </div>
+
+          {/* 拖曳浮層：in-ghost（不可見本體，只看紅/綠預覽） */}
+          <DragOverlay>
+            {activePiece ? <DraggablePiece piece={activePiece} isGhost /> : null}
+          </DragOverlay>
         </DndContext>
       </Card>
 
-      {/* ② 下方：文法任務（重組句子） */}
+      {/* ② 下方：文法任務 */}
       <Card>
         <div className="flex items-center justify-between mb-2">
           <SectionTitle
@@ -762,7 +765,6 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
             </div>
           )}
 
-          {/* 5. 錯誤：立刻顯示正解 + 知道了 */}
           {checked === false && (
             <div className="mt-3 p-2 rounded-lg border bg-amber-50 border-amber-300">
               <div className="text-xs font-medium text-amber-800 mb-1">
@@ -822,9 +824,6 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
               >
                 繳交
               </button>
-              {/*<button onClick={reshuffleTokens} className="px-4 py-2 rounded-xl border">
-                打亂順序
-              </button>*/}
             </>
           ) : (
             <button className="px-4 py-2 rounded-xl border" disabled>
@@ -837,9 +836,70 @@ export default function ReorderSentenceGame({ targets, onFinished }: Props) {
         </div>
       </Card>
 
-      {EndModal}
+      {/* End Modal */}
+      {gameOver && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white border shadow-lg p-5">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-full bg-neutral-900 text-white flex items-center justify-center text-lg">
+                ★
+              </div>
+              <div className="text-lg font-semibold">
+                {gameOver.reason === "completed" && "本輪完成"}
+                {gameOver.reason === "no-fit" && "遊戲結束（無可放置）"}
+                {gameOver.reason === "wrong-limit" && "遊戲結束（錯題達上限）"}
+              </div>
+            </div>
+            <div className="text-sm text-neutral-700">
+              總共消除行／列：<b>{linesCleared}</b>
+            </div>
+
+            {wrongItems.length > 0 && (
+              <div className="mt-3">
+                <div className="text-sm font-medium mb-1">錯誤題目與正解：</div>
+                <div className="max-h-64 overflow-auto space-y-2 pr-1">
+                  {wrongItems.map((w, i) => (
+                    <div key={i} className="p-2 rounded-xl border bg-neutral-50">
+                      <div className="text-xs text-neutral-500">題目</div>
+                      <div className="text-sm">{w.question}</div>
+                      <div className="mt-1 text-xs text-neutral-500">正解</div>
+                      <div className="text-sm font-medium">{w.correct}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setRoundIdx(0);
+                  const firstAns = tokenize(rounds[0] ?? "");
+                  let shuffled = shuffle(firstAns);
+                  if (shuffled.join("|") === firstAns.join("|"))
+                    shuffled = shuffle(firstAns);
+                  setTray(shuffled);
+                  setPicked([]);
+                  setChecked(null);
+                  setShowKnowBtn(false);
+
+                  setBoard(emptyBoard());
+                  setBag([]);
+                  setSelected(null);
+
+                  setLinesCleared(0);
+                  setWrongCount(0);
+                  setWrongItems([]);
+                  setGameOver(null);
+                }}
+                className="px-4 py-2 rounded-xl bg-neutral-900 text-white hover:opacity-90"
+              >
+                重新開始
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
-
